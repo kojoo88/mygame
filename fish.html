@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="my">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔫 ငါးပစ် ဂိမ်း</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: sans-serif; }
+        body { background: #000; overflow: hidden; }
+        canvas { display: block; background: linear-gradient(180deg, #0c4a6e 0%, #164e63 40%, #134e4a 100%); }
+        .ui {
+            position: absolute; top: 0; left: 0; width: 100%; padding: 15px;
+            display: flex; justify-content: space-between; align-items: center;
+            color: white; font-size: 18px; font-weight: bold; text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            pointer-events: none;
+        }
+        .start-screen, .end-screen {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.85); padding: 40px; border-radius: 20px; text-align: center;
+            color: white; z-index: 100;
+        }
+        button {
+            margin-top: 20px; padding: 12px 30px; font-size: 18px; background: #f59e0b;
+            border: none; border-radius: 8px; color: white; cursor: pointer; font-weight: bold;
+        }
+        button:hover { background: #d97706; }
+        .hint { font-size: 14px; color: #9ca3af; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+    
+    <div class="ui">
+        <div>🪙 ရွှေဒင်္ဂါး: <span id="coins">0</span></div>
+        <div>⏱️ အချိန်: <span id="timer">60</span>s</div>
+    </div>
+
+    <div class="start-screen" id="startScreen">
+        <h1>🐠 ငါးပစ် ဂိမ်း 🔫</h1>
+        <p class="hint" style="margin-top:15px">ကစားနည်း- ကြွက်ဖြင့် ဦးတည်ပြီး နှိပ်ပါ၊ ငါးကိုပစ်ပြီး ရွှေဒင်္ဂါးများရယူပါ!</p>
+        <button onclick="startGame()">စတင်ကစားရန်</button>
+    </div>
+
+    <div class="end-screen" id="endScreen" style="display:none;">
+        <h2>🎉 ဂိမ်းပြီးဆုံး!</h2>
+        <p style="font-size:22px; margin:15px 0">စုစုပေါင်းရွှေဒင်္ဂါး: <span id="finalCoins">0</span> 🪙</p>
+        <button onclick="restartGame()">ထပ်ကစားမည်</button>
+    </div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+let gameRunning = false;
+let coins = 0;
+let timeLeft = 60;
+let fishList = [];
+let bullets = [];
+let particles = [];
+let cannonAngle = 0;
+let cannonX = canvas.width / 2;
+let cannonY = canvas.height - 40;
+
+// ငါးအမျိုးအစားများ
+const fishTypes = [
+    { emoji: '🐟', size: 30, speed: 1.5, value: 10, chance: 0.4 },
+    { emoji: '🐠', size: 35, speed: 2, value: 20, chance: 0.25 },
+    { emoji: '🐡', size: 40, speed: 1, value: 30, chance: 0.15 },
+    { emoji: '🦈', size: 55, speed: 1.2, value: 50, chance: 0.12 },
+    { emoji: '🐙', size: 45, speed: 1.8, value: 40, chance: 0.08 }
+];
+
+class Fish {
+    constructor() {
+        this.type = this.randomType();
+        this.size = this.type.size;
+        this.emoji = this.type.emoji;
+        this.value = this.type.value;
+        this.speed = this.type.speed;
+        this.direction = Math.random() > 0.5 ? 1 : -1;
+        this.x = this.direction === 1 ? -this.size : canvas.width + this.size;
+        this.y = Math.random() * (canvas.height - 150) + 50;
+        this.oscillate = Math.random() * Math.PI * 2;
+        this.oscSpeed = 0.02 + Math.random() * 0.02;
+    }
+    randomType() {
+        let r = Math.random();
+        let cumulative = 0;
+        for (let t of fishTypes) {
+            cumulative += t.chance;
+            if (r <= cumulative) return t;
+        }
+        return fishTypes[0];
+    }
+    update() {
+        this.x += this.speed * this.direction;
+        this.oscillate += this.oscSpeed;
+        this.y += Math.sin(this.oscillate) * 0.8;
+        return this.x > -100 && this.x < canvas.width + 100;
+    }
+    draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        if (this.direction === -1) ctx.scale(-1, 1);
+        ctx.font = `${this.size}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(this.emoji, 0, 0);
+        ctx.restore();
+    }
+}
+
+class Bullet {
+    constructor(x, y, angle) {
+        this.x = x;
+        this.y = y;
+        this.angle = angle;
+        this.speed = 10;
+        this.radius = 5;
+    }
+    update() {
+        this.x += Math.cos(this.angle) * this.speed;
+        this.y += Math.sin(this.angle) * this.speed;
+        return this.x > 0 && this.x < canvas.width && this.y > 0 && this.y < canvas.height;
+    }
+    draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fillStyle = '#fef08a';
+        ctx.fill();
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = '#facc15';
+    }
+}
+
+class Particle {
+    constructor(x, y, text) {
+        this.x = x;
+        this.y = y;
+        this.text = text;
+        this.life = 60;
+        this.vy = -1.5;
+    }
+    update() {
+        this.y += this.vy;
+        this.life--;
+        return this.life > 0;
+    }
+    draw() {
+        ctx.font = 'bold 18px Arial';
+        ctx.fillStyle = `rgba(250, 204, 21, ${this.life / 60})`;
+        ctx.textAlign = 'center';
+        ctx.fillText(this.text, this.x, this.y);
+    }
+}
+
+function spawnFish() {
+    if (!gameRunning) return;
+    fishList.push(new Fish());
+    setTimeout(spawnFish, 800 + Math.random() * 700);
+}
+
+function drawCannon() {
+    ctx.save();
+    ctx.translate(cannonX, cannonY);
+    ctx.fillStyle = '#78350f';
+    ctx.beginPath();
+    ctx.arc(0, 15, 35, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#92400e';
+    ctx.beginPath();
+    ctx.arc(0, 10, 28, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.rotate(cannonAngle);
+    ctx.fillStyle = '#4b5563';
+    ctx.fillRect(0, -8, 45, 16);
+    ctx.fillStyle = '#6b7280';
+    ctx.fillRect(35, -10, 12, 20);
+    ctx.restore();
+}
+
+// ထိမှန်မှု စစ်ဆေးခြင်း
+function checkCollision(bullet, fish) {
+    let dx = bullet.x - fish.x;
+    let dy = bullet.y - fish.y;
+    let dist = Math.sqrt(dx*dx + dy*dy);
+    return dist < fish.size / 2 + bullet.radius;
+}
+
+canvas.addEventListener('mousemove', (e) => {
+    cannonAngle = Math.atan2(e.clientY - cannonY, e.clientX - cannonX) - Math.PI / 2;
+});
+
+canvas.addEventListener('click', (e) => {
+    if (!gameRunning) return;
+    let angle = Math.atan2(e.clientY - cannonY, e.clientX - cannonX) - Math.PI / 2;
+    let bx = cannonX + Math.sin(angle) * 45;
+    let by = cannonY - Math.cos(angle) * 45;
+    bullets.push(new Bullet(bx, by, angle));
+});
+
+function gameLoop() {
+    if (!gameRunning) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // ရေလှိုင်းအကျင့်
+    for (let i = 0; i < 5; i++) {
+        ctx.fillStyle = `rgba(255,255,255,${0.015 + i*0.005})`;
+        ctx.beginPath();
+        ctx.moveTo(0, canvas.height - i*30 - 20);
+        for (let x = 0; x <= canvas.width; x += 50) {
+            ctx.lineTo(x, canvas.height - i*30 - 20 + Math.sin((x + Date.now()/500) / 60) * 8);
+        }
+        ctx.lineTo(canvas.width, canvas.height);
+        ctx.lineTo(0, canvas.height);
+        ctx.fill();
+    }
+    
+    fishList = fishList.filter(fish => {
+        let alive = fish.update();
+        if (alive) fish.draw();
+        return alive;
+    });
+    
+    bullets = bullets.filter(bullet => {
+        let alive = bullet.update();
+        if (alive) {
+            bullet.draw();
+            for (let i = fishList.length - 1; i >= 0; i--) {
+                if (checkCollision(bullet, fishList[i])) {
+                    coins += fishList[i].value;
+                    document.getElementById('coins').textContent = coins;
+                    particles.push(new Particle(fishList[i].x, fishList[i].y, `+${fishList[i].value}`));
+                    fishList.splice(i, 1);
+                    return false;
+                }
+            }
+        }
+        return alive;
+    });
+    
+    particles = particles.filter(p => {
+        let alive = p.update();
+        if (alive) p.draw();
+        return alive;
+    });
+    
+    drawCannon();
+    requestAnimationFrame(gameLoop);
+}
+
+let timerInterval;
+function startGame() {
+    document.getElementById('startScreen').style.display = 'none';
+    document.getElementById('endScreen').style.display = 'none';
+    coins = 0; timeLeft = 60;
+    fishList = []; bullets = []; particles = [];
+    document.getElementById('coins').textContent = '0';
+    document.getElementById('timer').textContent = timeLeft;
+    
+    gameRunning = true;
+    spawnFish();
+    gameLoop();
+    
+    timerInterval = setInterval(() => {
+        timeLeft--;
+        document.getElementById('timer').textContent = timeLeft;
+        if (timeLeft <= 0) endGame();
+    }, 1000);
+}
+
+function endGame() {
+    gameRunning = false;
+    clearInterval(timerInterval);
+    document.getElementById('finalCoins').textContent = coins;
+    document.getElementById('endScreen').style.display = 'block';
+}
+
+function restartGame() {
+    startGame();
+}
+
+window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    cannonX = canvas.width / 2;
+    cannonY = canvas.height - 40;
+});
+</script>
+</body>
+                         </html>
+                         
